@@ -25,5 +25,5 @@ jobs:
           pip install -e ".[test]" ruff
       - name: Lint
         run: ruff check src tests
-      - name: Tests (CPU smoke: fake data, random weights, no downloads)
+      - name: "Tests (CPU smoke: fake data, random weights, no downloads)"
         run: pytest -q
