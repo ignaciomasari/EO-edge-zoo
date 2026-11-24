@@ -19,6 +19,7 @@ geo = ["torchgeo"]               # dataset download + S2 SSL weights
 test = ["pytest"]
 tb = ["tensorboard"]
 nb = ["matplotlib", "tabulate"]  # analysis notebook
+edge = ["onnx", "onnxscript", "onnxruntime"]  # ONNX export + CPU latency
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

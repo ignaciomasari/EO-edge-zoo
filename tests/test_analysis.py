@@ -91,3 +91,28 @@ def test_tag_fixed_vs_tuned_side_by_side(tmp_path):
                                          ("ft", "fixed"): 0.91, ("ft", "tuned"): 0.945})
     delta = paired_delta(tagged, "recipe", "tuned", "fixed", split_by=[]).set_index("mode")["mean"]
     assert delta.to_dict() == pytest.approx({"ft": 3.5, "lp": 0.0})
+
+
+# --- edge metrics merge + latency Pareto
+def test_summary_merges_edge_on_row_img_size_and_edge_params_win(tmp_path):
+    import pandas as pd
+
+    from eo_edge_zoo.analysis import EDGE_COLS
+    df = results(tmp_path, [row(0.9, img_size=224, seed=0), row(0.8, img_size=64, seed=0)])
+    bench = pd.DataFrame([dict(backbone="resnet50", in_chans=3, params_M=-1.0, infer_ips=100.0)])
+    edge = pd.DataFrame([dict(backbone="resnet50", in_chans=3, img_size=img, params_M=23.5, macs_G=macs,
+                              act_mem_MB=1.0, orin_fp16_est_ms=1.0, orin_int8_est_ms=0.5, ort_ms=ms, ort_p95_ms=ms)
+                         for img, macs, ms in [(64, 0.3, 8), (224, 4.1, 60)]])
+    stats = summary(df, bench, split_by=[], edge=edge).set_index("img_size")
+    assert stats.loc[224, "macs_G"] == 4.1 and stats.loc[64, "ort_ms"] == 8
+    assert (stats.params_M == 23.5).all() and (stats.infer_ips == 100).all()
+    assert set(EDGE_COLS) <= set(stats.columns)
+
+
+def test_pareto_lower_latency_is_better_when_not_maximize_x():
+    import pandas as pd
+
+    from eo_edge_zoo.analysis import pareto
+    points = pd.DataFrame(dict(ort_ms=[10, 20, 30], top1=[0.90, 0.85, 0.95]))
+    assert pareto(points, "ort_ms", maximize_x=False).ort_ms.tolist() == [10, 30]
+    assert pareto(points, "ort_ms").ort_ms.tolist() == [30]

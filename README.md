@@ -4,7 +4,7 @@
 
 Earth-observation models compared under **one evaluation protocol**: the same tasks, splits, label budgets and metrics for every model, so accuracy and speed numbers are directly comparable.
 
-**Status: early.** Today the repo holds the evaluation harness and its first task (EuroSAT scene classification) with a study of six pretrained backbones. Planned: edge metrics (MACs, peak memory, CPU latency), ONNX export with INT8 accuracy, small student models with distillation, on-device numbers, and more tasks (cloud segmentation, small-object detection).
+**Status: early.** Today the repo holds the evaluation harness, its first task (EuroSAT scene classification) with a study of six pretrained backbones, and edge proxy metrics (MACs, peak activation memory, CPU ONNX latency, an estimated Jetson latency). Planned: INT8 export with accuracy after quantization, small student models with distillation, on-device numbers, and more tasks (cloud segmentation, small-object detection).
 
 What the harness does:
 - **One config per run:** a YAML file plus `key=value` overrides becomes a validated `RunConfig`; a hash of the recipe identifies the run.
@@ -12,7 +12,8 @@ What the harness does:
 - **Grids:** a YAML file expands to the cartesian product of runs, with per-model rules. Each run is its own subprocess, finished runs are skipped, and failures are logged without stopping the grid.
 - **Fine-tune or linear probe:** fine-tuning uses Lightning; linear probes train a linear head on cached frozen features.
 - **Recipe tuning on validation data:** a sweep picks the best recipe per (backbone, init) on val and writes a new grid that applies it.
-- **Analysis:** seed-averaged tables, seed-paired deltas, FT − LP gaps and accuracy-vs-throughput Pareto plots.
+- **Edge proxy metrics:** params, MACs, peak activation memory, CPU ONNX Runtime FP32 latency and a roofline estimate of Jetson Orin Nano latency, at batch size 1, per (backbone, input bands, image size). The Jetson numbers are **estimates for ranking models, not measurements**, and are not yet calibrated on a device; see [the disclaimer](docs/usage.md#jetson-latency-estimate-disclaimer).
+- **Analysis:** seed-averaged tables, seed-paired deltas, FT − LP gaps and accuracy-vs-throughput or accuracy-vs-latency Pareto plots.
 
 ## Example: which backbone for few labels? (EuroSAT)
 
@@ -45,7 +46,7 @@ Caveats: 3 seeds, so differences under ~1.5 pp at 1 % labels are noise; pretrain
 ## Quickstart
 
 ```bash
-pip install -e ".[geo,nb,test]"         # geo = torchgeo (data download + S2 weights), nb = notebook/plots
+pip install -e ".[geo,nb,edge,test]"    # geo = torchgeo (data download + S2 weights), nb = notebook/plots, edge = ONNX
 export EO_EDGE_ZOO_WORK_DIR=/data/work  # optional: root for data cache + outputs (default: ..)
 
 python -m eo_edge_zoo.train --set mode=lp backbone=vit_s16 init=s2_ssl frac=0.01 seed=1   # one run
@@ -54,7 +55,7 @@ python -m eo_edge_zoo.grid configs/grid.yaml --dry-run                          
 
 ## Documentation
 
-- [Usage](docs/usage.md): configs and single runs, grids, recipe tuning, analysis
+- [Usage](docs/usage.md): configs and single runs, grids, recipe tuning, edge metrics, analysis
 - [Extending](docs/extending.md): adding a task or backbone, code layout, tests
 - [Licenses](docs/licenses.md): pretrained weights and datasets
 

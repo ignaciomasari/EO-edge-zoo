@@ -12,6 +12,9 @@ from .results import KEY
 GROUP = [k for k in KEY if k != "seed"] + ["in_chans"]  # summary rows
 log = logging.getLogger(__name__)
 BENCH_COLS = ["params_M", "infer_ips", "infer_mem_MB", "train_ips", "train_mem_MB"]  # bench.csv
+EDGE_KEY = ["backbone", "in_chans", "img_size"]
+EDGE_COLS = ["params_M", "macs_G", "act_mem_MB", "orin_fp16_est_ms", "orin_int8_est_ms", "ort_ms",
+             "ort_p95_ms"]  # edge.csv metrics
 
 
 def hparams(df: pd.DataFrame) -> pd.DataFrame:
@@ -49,15 +52,24 @@ def tag_by_grid(df: pd.DataFrame, grids: Mapping[str, str]) -> pd.DataFrame:
 
 
 def summary(df: pd.DataFrame, bench: pd.DataFrame | None = None,
-            split_by: Sequence[str] | None = None) -> pd.DataFrame:
-    """Mean ± std of top1_test over seeds per run key + split_by keys; + bench throughput if given."""
+            split_by: Sequence[str] | None = None, edge: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Mean ± std of top1_test over seeds per run key + split_by keys; + bench throughput if given;
+    + edge.csv metrics matched on row img_size (from config; edge params_M wins over bench) if given."""
     df, split_by = with_varied(df, split_by)
-    agg = (df.groupby(GROUP + split_by, dropna=False)
+    group = GROUP + split_by
+    if edge is not None and "img_size" not in group:
+        df = df.drop(columns="img_size", errors="ignore").join(hparams(df).reindex(columns=["img_size"]))
+        group.append("img_size")
+    agg = (df.groupby(group, dropna=False)
              .agg(top1=("top1_test", "mean"), std=("top1_test", "std"), n=("seed", "count"),
                   ft_mem_MB=("train_peak_mem_MB", "max"), ft_time_s=("train_time_s", "mean"))
              .reset_index())
     if bench is not None:
         agg = agg.merge(bench, on=["backbone", "in_chans"], how="left")
+    if edge is not None:
+        agg = agg.drop(columns=[col for col in edge if col in agg and col not in EDGE_KEY])
+        as_float = lambda frame: frame.assign(img_size=frame.img_size.astype(float))  # NaN-safe key match
+        agg = as_float(agg).merge(as_float(edge), on=EDGE_KEY, how="left")
     return agg
 
 
@@ -91,7 +103,7 @@ def ft_lp_gap(df: pd.DataFrame, split_by: Sequence[str] | None = None) -> pd.Dat
 
 
 def table(agg: pd.DataFrame, split_by: Sequence[str] = ()) -> pd.DataFrame:
-    """Wide: rows (backbone, init, *split_by), cols "FT 10%" = "mean ± std" (%); + bench cols if merged."""
+    """Wide: rows (backbone, init, *split_by), cols "FT 10%" = "mean ± std" (%); + bench / edge cols if merged."""
     agg = agg.assign(**{k: agg[k].astype(object).where(agg[k].notna(), "–") for k in split_by})  # other mode's key
     std = agg["std"].fillna(0)
     cell = (100 * agg.top1).map("{:.1f}".format) + " ± " + (100 * std).map("{:.1f}".format)
@@ -99,16 +111,17 @@ def table(agg: pd.DataFrame, split_by: Sequence[str] = ()) -> pd.DataFrame:
     index_cols = ["backbone", "init", *split_by]
     wide = (agg.assign(cell=cell, column=column)
                .pivot_table(index=index_cols, columns="column", values="cell", aggfunc="first").fillna(""))
-    bench_cols = [col for col in BENCH_COLS if col in agg]
-    if bench_cols:
-        wide = wide.join(agg.groupby(index_cols, dropna=False)[bench_cols].first().round(0))
+    for cols, decimals in ((BENCH_COLS, 0), ([col for col in EDGE_COLS if col not in BENCH_COLS], 2)):
+        if cols := [col for col in cols if col in agg]:
+            wide = wide.join(agg.groupby(index_cols, dropna=False)[cols].first().round(decimals))
     return wide
 
 
-def pareto(points: pd.DataFrame, x: str = "infer_ips", y: str = "top1") -> pd.DataFrame:
-    """Points no other point beats on both x and y (higher = better), sorted by x."""
+def pareto(points: pd.DataFrame, x: str = "infer_ips", y: str = "top1", maximize_x: bool = True) -> pd.DataFrame:
+    """Points no other point beats on both x and y (higher y better; x higher, or lower if not maximize_x), by x."""
     keep, best = [], float("-inf")
-    for i, point in points.dropna(subset=[x, y]).sort_values([x, y], ascending=False).iterrows():
+    ordered = points.dropna(subset=[x, y]).sort_values([x, y], ascending=[not maximize_x, False])
+    for i, point in ordered.iterrows():
         if point[y] > best:
             keep.append(i)
             best = point[y]
@@ -132,8 +145,9 @@ def variants(agg: pd.DataFrame, split_by: list[str]) -> list[tuple[str, pd.DataF
 
 
 def plot_pareto(agg: pd.DataFrame, split_by: Sequence[str] = (), x: str = "infer_ips",
-                xlabel: str = "inference img/s", ylabel: str = "test top-1 (%)"):
-    """Rows = split_by combos, cols = label fraction; legend/encoding in notebook md."""
+                xlabel: str = "inference img/s", ylabel: str = "test top-1 (%)", maximize_x: bool = True):
+    """Rows = split_by combos, cols = label fraction; legend/encoding in notebook md. Latency/MACs x:
+    maximize_x=False."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
@@ -143,7 +157,7 @@ def plot_pareto(agg: pd.DataFrame, split_by: Sequence[str] = (), x: str = "infer
     fig, axs = plt.subplots(len(groups), len(fracs), figsize=(5.5 * len(fracs), 4.5 * len(groups)),
                             sharex=True, squeeze=False)
     if agg[x].isna().any():
-        log.warning("no bench row (skipped): %s",
+        log.warning("no %s value (skipped): %s", x,
                     agg.loc[agg[x].isna(), ["backbone", "in_chans"]].drop_duplicates().values.tolist())
     for ax_row, (title, rows) in zip(axs, groups, strict=True):
         for ax, frac in zip(ax_row, fracs, strict=True):
@@ -153,7 +167,7 @@ def plot_pareto(agg: pd.DataFrame, split_by: Sequence[str] = (), x: str = "infer
                 ax.errorbar(point[x], 100 * point.top1, yerr=100 * (point["std"] if pd.notna(point["std"]) else 0),
                             fmt=marker_of[point.init], ms=8, color=colour,
                             mfc=colour if point["mode"] == "ft" else "none", capsize=3)
-            frontier = pareto(points[points["mode"] == "ft"], x)
+            frontier = pareto(points[points["mode"] == "ft"], x, maximize_x=maximize_x)
             if len(frontier):
                 ax.plot(frontier[x], 100 * frontier.top1, "k--", lw=1, zorder=0)
             ax.set_xscale("log")

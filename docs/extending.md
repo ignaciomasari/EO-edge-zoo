@@ -30,7 +30,7 @@ Register it in `src/eo_edge_zoo/models.py`, with any timm architecture and the i
 BACKBONES["effnet_b0"] = Backbone("efficientnet_b0", "ra_in1k", None, (Init.IMAGENET_RGB, Init.IMAGENET_13CH))
 ```
 
-Then use `backbone=effnet_b0` in a config or grid; the benchmark picks it up too. For S2 SSL support, pass the torchgeo weights name (e.g. `"ResNet50_Weights.SENTINEL2_ALL_MOCO"`).
+Then use `backbone=effnet_b0` in a config or grid; the benchmark and edge metrics pick it up too. For S2 SSL support, pass the torchgeo weights name (e.g. `"ResNet50_Weights.SENTINEL2_ALL_MOCO"`).
 
 ## Layout
 
@@ -44,5 +44,6 @@ Then use `backbone=effnet_b0` in a config or grid; the benchmark picks it up too
 | `results.py` | `ResultRow` / `FTMetrics` / `LPMetrics`; append-only results CSV |
 | `grid.py`, `tune.py` | `GridSpec`, `Rule`, `launch`; val-based recipe selection |
 | `analysis.py`, `bench.py` | tables, paired deltas, Pareto plots; throughput / memory benchmark |
+| `edge.py` | edge proxy metrics: params, MACs, peak activation memory, ONNX export, CPU ONNX Runtime latency, Jetson roofline estimate (`Device`, `op_costs`, `roofline_ms`) |
 
 Tests: `pytest` (CPU only, fake data, no downloads); CI runs them with `ruff` on Python 3.11 and 3.12.
