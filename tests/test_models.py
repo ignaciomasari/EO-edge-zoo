@@ -2,8 +2,7 @@ import pytest
 import torch
 from timm.layers import DropPath
 
-from bakeoff.data import RGB_IDX
-from bakeoff.models import InputSpec, build, load_s2_weights, prep
+from eo_edge_zoo.models import InputSpec, build, load_s2_weights, prep
 
 
 def first_conv_in_chans(model):
@@ -25,7 +24,7 @@ def test_prep_s2_scales_dn_to_reflectance_and_resizes():
 def test_prep_rgb_selects_red_green_blue_and_clips():
     x = torch.zeros(1, 13, 4, 4, dtype=torch.int16)
     x[:, 3], x[:, 2], x[:, 1] = 6000, 1500, 0  # B04 over-range, B03 half, B02 zero
-    spec = InputSpec(idx=RGB_IDX, scale=3000.0, clip=True, mean=torch.full((3,), 0.5), std=torch.full((3,), 0.5))
+    spec = InputSpec(idx=[3, 2, 1], scale=3000.0, clip=True, mean=torch.full((3,), 0.5), std=torch.full((3,), 0.5))
     out = prep(x, spec, train=False, img_size=4)
     assert out[0, :, 0, 0].tolist() == [1.0, 0.0, -1.0]  # (clip(v/3000)-.5)/.5
 
@@ -57,49 +56,49 @@ def test_prep_eval_is_deterministic():
     ("resnet50", "imagenet_rgb", 3), ("resnet50", "s2_ssl", 13),
     ("convnext_t", "imagenet_13ch", 13), ("vit_s16", "s2_ssl", 13)])
 def test_build_input_channels_follow_init(backbone, init, chans):
-    model, spec = build(backbone, init, pretrained=False, band_mean=torch.zeros(13), band_std=torch.ones(13))
+    model, spec = build(backbone, init, task="eurosat", pretrained=False, band_mean=torch.zeros(13), band_std=torch.ones(13))
     assert first_conv_in_chans(model) == chans == len(spec.idx)
 
 
 def test_build_head_has_num_classes():
-    model, _ = build("resnet50", "s2_ssl", num_classes=10, pretrained=False)
+    model, _ = build("resnet50", "s2_ssl", num_classes=10, task="eurosat", pretrained=False)
     assert model(torch.zeros(1, 13, 64, 64)).shape == (1, 10)
 
 
 def test_imagenet_rgb_spec_uses_each_models_pretrain_norm():
-    _, rn = build("resnet50", "imagenet_rgb", pretrained=False)
-    _, vit = build("vit_s16", "imagenet_rgb", pretrained=False)
-    assert rn.idx == RGB_IDX and rn.clip
+    _, rn = build("resnet50", "imagenet_rgb", task="eurosat", pretrained=False)
+    _, vit = build("vit_s16", "imagenet_rgb", task="eurosat", pretrained=False)
+    assert rn.idx == [3, 2, 1] and rn.clip  # B04, B03, B02
     assert torch.allclose(rn.mean.flatten(), torch.tensor([0.485, 0.456, 0.406]))
     assert torch.allclose(vit.mean.flatten(), torch.tensor([0.5, 0.5, 0.5]))  # augreg != ImageNet stats
 
 
 def test_imagenet_13ch_spec_is_band_zscore():
     mean, std = torch.arange(13.0), torch.arange(1.0, 14.0)
-    _, spec = build("convnext_t", "imagenet_13ch", pretrained=False, band_mean=mean, band_std=std)
+    _, spec = build("convnext_t", "imagenet_13ch", task="eurosat", pretrained=False, band_mean=mean, band_std=std)
     assert torch.equal(spec.mean.flatten(), mean) and torch.equal(spec.std.flatten(), std)
 
 
 def test_s2_spec_divides_by_10k():
-    _, spec = build("vit_s16", "s2_ssl", pretrained=False)
+    _, spec = build("vit_s16", "s2_ssl", task="eurosat", pretrained=False)
     assert spec.scale == 10_000.0 and not spec.clip
 
 
 def test_unavailable_init_raises():
     with pytest.raises(ValueError):
-        build("convnext_t", "s2_ssl", pretrained=False)
+        build("convnext_t", "s2_ssl", task="eurosat", pretrained=False)
 
 
 # --- S2 checkpoint key guard
 
 def test_s2_weights_load_when_only_head_missing():
-    model, _ = build("resnet50", "s2_ssl", pretrained=False)
+    model, _ = build("resnet50", "s2_ssl", task="eurosat", pretrained=False)
     state_dict = {key: value for key, value in model.state_dict().items() if not key.startswith("fc.")}
     load_s2_weights(model, state_dict)
 
 
 def test_s2_weights_reject_missing_backbone_keys():
-    model, _ = build("resnet50", "s2_ssl", pretrained=False)
+    model, _ = build("resnet50", "s2_ssl", task="eurosat", pretrained=False)
     state_dict = {key: value for key, value in model.state_dict().items() if not key.startswith("layer4.")}
     with pytest.raises(ValueError):
         load_s2_weights(model, state_dict)
@@ -116,12 +115,12 @@ def head_drop(model):
 
 @pytest.mark.parametrize("backbone,init", [("vit_s16", "s2_ssl"), ("convnext_t", "imagenet_rgb"), ("resnet50", "imagenet_rgb")])
 def test_drop_rates_reach_model(backbone, init):
-    model, _ = build(backbone, init, 3, pretrained=False, drop_rate=0.3, drop_path_rate=0.2)
+    model, _ = build(backbone, init, 3, task="eurosat", pretrained=False, drop_rate=0.3, drop_path_rate=0.2)
     drop_path_probs = [module.drop_prob for module in model.modules() if isinstance(module, DropPath)]
     assert drop_path_probs and max(drop_path_probs) == pytest.approx(0.2)  # linear decay -> last block = rate
     assert head_drop(model) == pytest.approx(0.3)
 
 
 def test_drop_rates_default_off():
-    model, _ = build("vit_s16", "imagenet_rgb", 3, pretrained=False)
+    model, _ = build("vit_s16", "imagenet_rgb", 3, task="eurosat", pretrained=False)
     assert not any(isinstance(module, DropPath) for module in model.modules()) and head_drop(model) == 0.0

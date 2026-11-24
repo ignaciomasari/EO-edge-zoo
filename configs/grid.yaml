@@ -1,4 +1,4 @@
-# Full bake-off: python -m bakeoff.grid configs/grid.yaml   (resumable; --dry-run lists pending)
+# Full bake-off: python -m eo_edge_zoo.grid configs/grid.yaml   (resumable; --dry-run lists pending)
 # unavailable (backbone, init) combos skipped -> 6 pairs x 2 modes x 3 fracs x 3 seeds = 108 runs
 base: default.yaml
 set: {}

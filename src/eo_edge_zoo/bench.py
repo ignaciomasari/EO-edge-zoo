@@ -1,4 +1,4 @@
-"""Throughput + peak memory: `python -m bakeoff.bench --out bench.csv`."""
+"""Throughput + peak memory: `python -m eo_edge_zoo.bench --out bench.csv`."""
 import argparse
 import gc
 import time

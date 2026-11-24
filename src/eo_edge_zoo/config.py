@@ -5,9 +5,10 @@ import json
 import os
 import types
 import typing
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Sequence
+from typing import Any
 
 import yaml
 
@@ -15,10 +16,11 @@ POD_WORK_DIR = "/home/jovyan/work"
 
 
 def work_dir() -> str:
-    """$BAKEOFF_WORK_DIR, else pod PVC if present, else parent dir (same rule as notebook). Read per call."""
-    return os.environ.get("BAKEOFF_WORK_DIR") or (POD_WORK_DIR if os.path.isdir(POD_WORK_DIR) else "..")
+    """$EO_EDGE_ZOO_WORK_DIR, else pod PVC if present, else parent dir (same rule as notebook). Read per call."""
+    return os.environ.get("EO_EDGE_ZOO_WORK_DIR") or (POD_WORK_DIR if os.path.isdir(POD_WORK_DIR) else "..")
 
 
+DEFAULT_TASK = "eurosat"  # omitted from recipe -> hashes = pre-task bake-off runs
 EPOCHS_BY_FRAC = {0.01: 200, 0.1: 50, 1.0: 15}  # same per fraction for every backbone
 
 
@@ -46,6 +48,7 @@ class Aug(StrEnum):
 @dataclass
 class RunConfig:
     # run
+    task: str = DEFAULT_TASK  # key in tasks.TASKS
     mode: Mode = Mode.FT
     backbone: str = "resnet50"
     init: Init = Init.IMAGENET_RGB
@@ -53,7 +56,7 @@ class RunConfig:
     seed: int = 0
     # shared
     img_size: int = 224
-    num_classes: int = 10
+    num_classes: int | None = None  # None -> task's
     pretrained: bool = True
     precision: str = "bf16-mixed"
     # FT recipe
@@ -75,8 +78,8 @@ class RunConfig:
     lp_bs: int = 256
     lp_wd_grid: list[float] = field(default_factory=lambda: [0.0, 1e-4, 1e-3, 1e-2])
     # system (not in hash)
-    out_dir: str | None = None      # None -> WORK_DIR/saved_models/backbone_bakeoff (= notebook OUT_DIR)
-    data_root: str | None = None    # None -> WORK_DIR/data/eurosat (= notebook cache)
+    out_dir: str | None = None      # None -> WORK_DIR/saved_models/eo_edge_zoo/<task>
+    data_root: str | None = None    # None -> WORK_DIR/data/<task>
     results_csv: str | None = None  # None -> out_dir/results.csv (= notebook)
     accelerator: str = "auto"
     num_workers: int = 0            # loader workers; data already in RAM
@@ -100,9 +103,13 @@ class RunConfig:
             setattr(self, config_field.name, value)
         self.epochs_by_frac = {float(frac): int(epochs) for frac, epochs in self.epochs_by_frac.items()}
         self.lp_wd_grid = [float(wd) for wd in self.lp_wd_grid]
+        from .tasks import get_task  # lazy: tasks import config (Init)
+        task = get_task(self.task)
+        if self.num_classes is None:
+            self.num_classes = task.num_classes
         root = work_dir()
-        self.out_dir = self.out_dir or os.path.join(root, "saved_models", "backbone_bakeoff")
-        self.data_root = self.data_root or os.path.join(root, "data", "eurosat")
+        self.out_dir = self.out_dir or os.path.join(root, "saved_models", "eo_edge_zoo", self.task)
+        self.data_root = self.data_root or os.path.join(root, "data", self.task)
         self.results_csv = self.results_csv or os.path.join(self.out_dir, "results.csv")
         for key in ("out_dir", "data_root", "results_csv"):  # "{WORK_DIR}/..." -> pod/local work dir
             setattr(self, key, getattr(self, key).replace("{WORK_DIR}", root))
@@ -119,7 +126,7 @@ def base_type(annotation: Any) -> Any:
     return annotation
 
 
-SHARED_KEYS = {"mode", "backbone", "init", "frac", "seed", "img_size", "num_classes", "pretrained", "precision"}
+SHARED_KEYS = {"task", "mode", "backbone", "init", "frac", "seed", "img_size", "num_classes", "pretrained", "precision"}
 SYSTEM_KEYS = {"out_dir", "data_root", "results_csv", "accelerator", "num_workers", "progress", "curves", "tensorboard"}
 FT_KEYS = {"epochs", "epochs_by_frac", "lr", "wd", "warmup_frac", "label_smooth", "clip", "bs",
            "drop_rate", "drop_path_rate", "aug", "val_every"}
@@ -134,6 +141,8 @@ def recipe(cfg: RunConfig) -> dict[str, Any]:
     """Fields defining the run for cfg.mode (shared + mode's own); epochs resolved."""
     keep = SHARED_KEYS | MODE_KEYS[cfg.mode]
     values = {key: value for key, value in dataclasses.asdict(cfg).items() if key in keep}
+    if cfg.task == DEFAULT_TASK:
+        del values["task"]
     if cfg.mode == Mode.FT:
         del values["epochs_by_frac"]
         values["epochs"] = cfg.max_epochs

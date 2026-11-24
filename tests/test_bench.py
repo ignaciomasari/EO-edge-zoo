@@ -1,7 +1,7 @@
 import pandas as pd
 import torch
 
-from bakeoff.bench import imgs_per_s, main
+from eo_edge_zoo.bench import imgs_per_s, main
 
 TINY = dict(bs=2, img=16, warmup=1, iters=2, device="cpu")
 

@@ -3,7 +3,7 @@ base: default.yaml
 set:
   epochs: 2
   lp_epochs: 10
-  out_dir: "{WORK_DIR}/saved_models/backbone_bakeoff/quick"
+  out_dir: "{WORK_DIR}/saved_models/eo_edge_zoo/eurosat/quick"
 grid:
   mode: [lp, ft]
   backbone: [resnet50, vit_s16, convnext_t]

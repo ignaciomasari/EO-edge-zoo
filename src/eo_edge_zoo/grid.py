@@ -1,6 +1,6 @@
 """Grid launcher: one subprocess per run, skip finished (config_hash in results), failures logged + skipped.
 
-`python -m bakeoff.grid configs/grid.yaml [--set epochs=2] [--dry-run]`
+`python -m eo_edge_zoo.grid configs/grid.yaml [--set epochs=2] [--dry-run]`
 grid.yaml: base (config path, rel. to grid file), set (fixed overrides), grid (key -> list; cartesian product),
 rules (optional [{when: {backbone: .., init: ..}, set: {..}}] -> overrides for matching runs, e.g. tuned recipes).
 """
@@ -25,9 +25,10 @@ from .config import RunConfig, config_hash, load_config
 from .models import available
 from .results import KEY, append_csv, done_hashes
 
-PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # for PYTHONPATH of children
-TRAIN_CMD = [sys.executable, "-m", "bakeoff.train"]
-log = logging.getLogger("bakeoff.grid")  # not __name__: "__main__" under `python -m`
+SRC_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # src/: PYTHONPATH of children
+REPO_ROOT = os.path.dirname(SRC_ROOT)  # configs/ live here
+TRAIN_CMD = [sys.executable, "-m", "eo_edge_zoo.train"]
+log = logging.getLogger("eo_edge_zoo.grid")  # not __name__: "__main__" under `python -m`
 
 
 @dataclass
@@ -99,10 +100,10 @@ class GridSpec:
     def expand(self, overrides: Sequence[str] = ()) -> list[Run]:
         """-> [Run] in grid order; unavailable (backbone, init) dropped. Bad keys/values raise here."""
         fixed = [_override(key, value) for key, value in self.set.items()]
-        keys, value_lists = zip(*self.grid.items()) if self.grid else ((), ())
+        keys, value_lists = zip(*self.grid.items(), strict=True) if self.grid else ((), ())
         runs = []
         for combo in itertools.product(*value_lists):
-            grid_overrides = fixed + [_override(key, value) for key, value in zip(keys, combo)]
+            grid_overrides = fixed + [_override(key, value) for key, value in zip(keys, combo, strict=True)]
             cfg = load_config(self.base, grid_overrides + list(overrides))
             rule_overrides = [_override(key, value) for rule in self.rules if rule.matches(cfg)
                               for key, value in rule.set.items()]
@@ -118,14 +119,26 @@ def expand(grid_path: str, overrides: Sequence[str] = ()) -> list[Run]:
 
 
 def child_env() -> dict[str, str]:
-    """os.environ + PKG_ROOT on PYTHONPATH -> `python -m bakeoff.*` works without install."""
-    return {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [PKG_ROOT, os.environ.get("PYTHONPATH")]))}
+    """os.environ + SRC_ROOT on PYTHONPATH -> `python -m eo_edge_zoo.*` works without install."""
+    return {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [SRC_ROOT, os.environ.get("PYTHONPATH")]))}
+
+
+NEW_OUT, LEGACY_OUT = os.path.join("saved_models", "eo_edge_zoo", "eurosat"), os.path.join("saved_models", "backbone_bakeoff")
+
+
+def legacy_results(results_csv: str) -> str | None:
+    """Pre-rename bake-off results.csv if it exists and new one doesn't (else resume restarts silently)."""
+    old = results_csv.replace(NEW_OUT, LEGACY_OUT)
+    return old if old != results_csv and not os.path.isfile(results_csv) and os.path.isfile(old) else None
 
 
 def pending(runs: Sequence[Run]) -> list[Run]:
     done = {}
     for run in runs:
         if run.cfg.results_csv not in done:
+            if old := legacy_results(run.cfg.results_csv):
+                log.warning("no %s but found %s: move %s -> %s to resume", run.cfg.results_csv, old,
+                            os.path.dirname(old), os.path.dirname(run.cfg.results_csv))
             done[run.cfg.results_csv] = done_hashes(run.cfg.results_csv)
     return [run for run in runs if run.run_id not in done[run.cfg.results_csv]]
 
@@ -144,7 +157,7 @@ def _log_failure(run: Run, returncode: int, log_path: str, error: str) -> None:
 
 def launch(grid_path: str, overrides: Sequence[str] = (), cmd: Sequence[str] | None = None, dry_run: bool = False,
            timeout_s: float | None = None) -> dict[str, int]:
-    """Run pending grid -> dict(ok, failed, skipped). cmd: child argv prefix (default bakeoff.train).
+    """Run pending grid -> dict(ok, failed, skipped). cmd: child argv prefix (default eo_edge_zoo.train).
     timeout_s: kill hung run -> failure."""
     runs = expand(grid_path, overrides)
     todo = pending(runs)

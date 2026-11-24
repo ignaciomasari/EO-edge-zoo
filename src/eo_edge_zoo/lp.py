@@ -11,6 +11,7 @@ from . import models as bm
 from .config import RunConfig
 from .data import Data
 from .results import LPMetrics
+from .tasks import Task, get_task
 
 
 def device_of(cfg: RunConfig) -> torch.device:
@@ -65,13 +66,13 @@ def train_linear(feats: torch.Tensor, y: torch.Tensor, wd: float, cfg: RunConfig
 
 
 @torch.no_grad()
-def _acc(head: nn.Module, feats: torch.Tensor, y: torch.Tensor) -> float:
-    return (head(feats).argmax(1) == y).float().mean().item()
+def _score(task: Task, head: nn.Module, feats: torch.Tensor, y: torch.Tensor) -> float:
+    return task.score(head(feats).argmax(1), y)
 
 
 def run_lp(cfg: RunConfig, data: Data) -> LPMetrics:
     """Standardise w/ subset stats; best wd on val -> test."""
-    device = device_of(cfg)
+    device, task = device_of(cfg), get_task(cfg.task)
     feats = extract(cfg, data, device)
     idx, _, y_train = bd.train_subset(data, cfg)
     train_feats, y_train = feats["train"][idx].to(device), y_train.to(device)
@@ -80,6 +81,6 @@ def run_lp(cfg: RunConfig, data: Data) -> LPMetrics:
     train_feats = (train_feats - mu) / sd
     (val_feats, y_val), (test_feats, y_test) = standardised("val"), standardised("test")
     heads = [(wd, train_linear(train_feats, y_train, wd, cfg)) for wd in cfg.lp_wd_grid]
-    val_acc, wd, head = max(((_acc(head, val_feats, y_val), wd, head) for wd, head in heads),
+    val_score, wd, head = max(((_score(task, head, val_feats, y_val), wd, head) for wd, head in heads),
                             key=lambda candidate: candidate[0])
-    return LPMetrics(n_train=len(idx), top1_val=val_acc, top1_test=_acc(head, test_feats, y_test), lp_wd=wd)
+    return LPMetrics(n_train=len(idx), top1_val=val_score, top1_test=_score(task, head, test_feats, y_test), lp_wd=wd)

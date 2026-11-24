@@ -7,7 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .config import Init, RunConfig
-from .data import RGB_DN_MAX, RGB_IDX, band_stats
+from .data import band_stats
+from .tasks import Task, get_task
 
 
 @dataclass(frozen=True)
@@ -76,30 +77,35 @@ def load_s2_weights(model: nn.Module, state_dict: dict[str, torch.Tensor]) -> No
         raise ValueError(f"S2 checkpoint key mismatch: {sorted(bad)[:5]}...")
 
 
-def build(backbone: str, init: Init | str, num_classes: int = 10, *, device: torch.device | str = "cpu",
-          band_mean: torch.Tensor | None = None, band_std: torch.Tensor | None = None, pretrained: bool = True,
-          drop_rate: float = 0.0, drop_path_rate: float = 0.0) -> tuple[nn.Module, InputSpec]:
-    """-> (model on device, channels_last; InputSpec). band_mean/std needed for imagenet_13ch."""
-    init = Init(init)
+def build(backbone: str, init: Init | str, num_classes: int | None = None, *, task: Task | str,
+          device: torch.device | str = "cpu", band_mean: torch.Tensor | None = None,
+          band_std: torch.Tensor | None = None, pretrained: bool = True, drop_rate: float = 0.0,
+          drop_path_rate: float = 0.0) -> tuple[nn.Module, InputSpec]:
+    """-> (model on device, channels_last; InputSpec). Input bands, DN scaling, head size (num_classes=None) from task.
+    band_mean/std (over all task bands) needed for imagenet_13ch."""
+    init, task = Init(init), get_task(task) if isinstance(task, str) else task
+    num_classes = task.num_classes if num_classes is None else num_classes
+    input_band_idx = task.input_idx(init)
     if not available(backbone, init):
         raise ValueError(f"{init} not available for {backbone}")
     entry = BACKBONES[backbone]
     timm_kwargs = dict(num_classes=num_classes, drop_rate=drop_rate, drop_path_rate=drop_path_rate)
     if init is Init.IMAGENET_RGB:
         model = timm.create_model(entry.imagenet_name, pretrained=pretrained, **timm_kwargs)
-        spec = InputSpec(RGB_IDX, scale=RGB_DN_MAX, clip=True,
+        spec = InputSpec(input_band_idx, scale=task.rgb_dn_max, clip=True,
                          mean=model.pretrained_cfg["mean"], std=model.pretrained_cfg["std"])
     elif init is Init.IMAGENET_13CH:
         if band_mean is None or band_std is None:
             raise ValueError("imagenet_13ch needs band_mean/band_std")
-        # timm adapt_input_conv: stem filters tiled R,G,B,... over 13 bands, x 3/13
-        model = timm.create_model(entry.imagenet_name, pretrained=pretrained, in_chans=13, **timm_kwargs)
-        spec = InputSpec(list(range(13)), scale=1.0, clip=False, mean=band_mean, std=band_std)
+        # timm adapt_input_conv: stem filters tiled R,G,B,... over all bands, x 3/C
+        model = timm.create_model(entry.imagenet_name, pretrained=pretrained, in_chans=len(input_band_idx), **timm_kwargs)
+        spec = InputSpec(input_band_idx, scale=1.0, clip=False, mean=band_mean, std=band_std)
     else:  # Init.S2_SSL
-        model = timm.create_model(entry.arch, in_chans=13, **timm_kwargs)
+        model = timm.create_model(entry.arch, in_chans=len(input_band_idx), **timm_kwargs)
         if pretrained:
             load_s2_weights(model, _s2_weights(entry.s2_weights).get_state_dict(progress=True))
-        spec = InputSpec(list(range(13)), scale=10_000.0, clip=False, mean=torch.zeros(13), std=torch.ones(13))
+        spec = InputSpec(input_band_idx, scale=task.reflectance_scale, clip=False,
+                         mean=torch.zeros(len(input_band_idx)), std=torch.ones(len(input_band_idx)))
     return model.to(device, memory_format=torch.channels_last), spec.to(device)
 
 
@@ -107,7 +113,8 @@ def build_from(cfg: RunConfig, train_x: torch.Tensor, *, num_classes: int | None
                device: torch.device | str = "cpu") -> tuple[nn.Module, InputSpec]:
     """build() from RunConfig; train_x (int16) only used for imagenet_13ch band stats."""
     mean, std = band_stats(train_x) if cfg.init is Init.IMAGENET_13CH else (None, None)
-    return build(cfg.backbone, cfg.init, cfg.num_classes if num_classes is None else num_classes, device=device,
+    return build(cfg.backbone, cfg.init, cfg.num_classes if num_classes is None else num_classes, task=cfg.task,
+                 device=device,
                  band_mean=mean, band_std=std, pretrained=cfg.pretrained,
                  drop_rate=cfg.drop_rate, drop_path_rate=cfg.drop_path_rate)
 

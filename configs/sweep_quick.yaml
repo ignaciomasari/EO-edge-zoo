@@ -1,6 +1,6 @@
 # Smoke test of the tuning path (QUICK): 6 pairs x 2 lr = 12 runs, 2 epochs, quick/ out dir (= quick.yaml)
 base: default.yaml
-set: {mode: ft, frac: 0.1, seed: 100, epochs: 2, out_dir: "{WORK_DIR}/saved_models/backbone_bakeoff/quick"}
+set: {mode: ft, frac: 0.1, seed: 100, epochs: 2, out_dir: "{WORK_DIR}/saved_models/eo_edge_zoo/eurosat/quick"}
 grid:
   backbone: [resnet50, vit_s16, convnext_t]
   init: [imagenet_rgb, s2_ssl, imagenet_13ch]

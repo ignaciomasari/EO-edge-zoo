@@ -1,10 +1,9 @@
 import yaml
-
-from bakeoff.grid import expand
-from bakeoff.results import log_row
-from bakeoff.tune import pick
-
 from test_grid import DEFAULT
+
+from eo_edge_zoo.grid import expand
+from eo_edge_zoo.results import log_row
+from eo_edge_zoo.tune import pick
 
 
 def sweep_file(tmp_path):
@@ -45,7 +44,7 @@ def test_pick_skips_pairs_without_results(tmp_path):
 
 
 def test_write_tuned_handles_enum_hparams(tmp_path):
-    from bakeoff.tune import write_tuned
+    from eo_edge_zoo.tune import write_tuned
     sweep_path = tmp_path / "sweep.yaml"
     sweep_path.write_text(yaml.safe_dump({"base": DEFAULT, "set": {"out_dir": str(tmp_path), "frac": 0.1},
                                           "grid": {"aug": ["d4", "none"]}}))

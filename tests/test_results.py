@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 
-from bakeoff.results import RESULT_COLS, done_keys, log_row, read_results
+from eo_edge_zoo.results import RESULT_COLS, done_keys, log_row, read_results
 
 
 def test_lp_and_ft_rows_share_one_header(tmp_path):
@@ -41,8 +41,8 @@ def test_unknown_result_col_raises(tmp_path):
 
 
 def test_result_row_from_run_round_trips(tmp_path):
-    from bakeoff.config import load_config
-    from bakeoff.results import LPMetrics, ResultRow
+    from eo_edge_zoo.config import load_config
+    from eo_edge_zoo.results import LPMetrics, ResultRow
     cfg = load_config(None, ["mode=lp", "init=s2_ssl", f"out_dir={tmp_path}"])
     log_row(cfg.results_csv, ResultRow.from_run(cfg, LPMetrics(n_train=5, top1_val=0.8, top1_test=0.7, lp_wd=1e-3)))
     saved = read_results(cfg.results_csv).iloc[0]

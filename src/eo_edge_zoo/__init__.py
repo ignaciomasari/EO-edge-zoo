@@ -1,4 +1,4 @@
-"""EuroSAT backbone bake-off: data, models, benchmarking."""
+"""eo-edge-zoo: EO tasks x backbones x recipes -> comparable accuracy + edge metrics."""
 import logging
 import sys
 
@@ -18,7 +18,7 @@ class _StdoutHandler(logging.StreamHandler):
 
 
 def setup_logging(level: int = logging.INFO) -> logging.Logger:
-    """bakeoff.* records -> stdout as bare messages (CLI mains + notebook). Idempotent."""
+    """eo_edge_zoo.* records -> stdout as bare messages (CLI mains + notebook). Idempotent."""
     logger = logging.getLogger(__name__)
     if not any(isinstance(handler, _StdoutHandler) for handler in logger.handlers):
         handler = _StdoutHandler()

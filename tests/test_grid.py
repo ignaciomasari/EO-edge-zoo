@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 import yaml
 
-from bakeoff.grid import expand, launch, pending
-from bakeoff.results import log_row
+from eo_edge_zoo.grid import expand, launch, pending
+from eo_edge_zoo.results import log_row
 
 DEFAULT = str(Path(__file__).parents[1] / "configs" / "default.yaml")
 
@@ -48,11 +48,20 @@ def test_runs_with_hash_in_results_are_skipped(tmp_path):
     assert len(pending(changed)) == 3  # recipe changed -> new hashes
 
 
+def test_warns_when_only_pre_rename_results_exist(tmp_path, caplog):
+    new_dir, old_dir = tmp_path / "saved_models" / "eo_edge_zoo" / "eurosat", tmp_path / "saved_models" / "backbone_bakeoff"
+    old_dir.mkdir(parents=True)
+    (old_dir / "results.csv").write_text("backbone\n")
+    runs = expand(grid_file(tmp_path, {"seed": [0]}, {"out_dir": str(new_dir)}))
+    pending(runs)
+    assert "backbone_bakeoff" in caplog.text  # move hint, else resume silently restarts from scratch
+
+
 # --- failure isolation (real subprocesses, stand-in runner)
 FAKE_RUNNER = """
 import sys
-from bakeoff.config import config_hash, load_config
-from bakeoff.results import log_row
+from eo_edge_zoo.config import config_hash, load_config
+from eo_edge_zoo.results import log_row
 argv = sys.argv[1:]
 cfg = load_config(argv[1], argv[3:])
 if cfg.seed == 1:
@@ -112,8 +121,8 @@ def test_unknown_grid_file_key_raises(tmp_path):
 
 
 def test_spec_dump_load_round_trip(tmp_path):
-    from bakeoff.config import Init
-    from bakeoff.grid import GridSpec, Rule
+    from eo_edge_zoo.config import Init
+    from eo_edge_zoo.grid import GridSpec, Rule
     spec = GridSpec.load(grid_file(tmp_path, {"seed": [0, 1]})).with_rules(
         [Rule({"backbone": "resnet50", "init": Init.S2_SSL}, {"lr": 1e-3})])  # enum -> plain str in YAML
     spec.dump(str(tmp_path / "out.yaml"))
@@ -124,7 +133,7 @@ def test_spec_dump_load_round_trip(tmp_path):
 
 # --- logging
 def test_launch_progress_reaches_stdout_once(tmp_path, capsys):
-    from bakeoff import setup_logging
+    from eo_edge_zoo import setup_logging
     setup_logging()
     setup_logging()  # idempotent: no duplicate handler
     launch(grid_file(tmp_path, {"seed": [0, 1]}), dry_run=True)
@@ -134,7 +143,8 @@ def test_launch_progress_reaches_stdout_once(tmp_path, capsys):
 
 def test_cli_dry_run_prints_progress(tmp_path):
     import subprocess
-    from bakeoff.grid import child_env
-    result = subprocess.run([sys.executable, "-m", "bakeoff.grid", grid_file(tmp_path, {"seed": [0, 1]}), "--dry-run"],
+
+    from eo_edge_zoo.grid import child_env
+    result = subprocess.run([sys.executable, "-m", "eo_edge_zoo.grid", grid_file(tmp_path, {"seed": [0, 1]}), "--dry-run"],
                             env=child_env(), capture_output=True, text=True, check=True)
     assert "2 runs, 2 to do" in result.stdout and "seed=1" in result.stdout

@@ -3,16 +3,17 @@ import json
 import pytest
 import yaml
 
-from bakeoff.analysis import ft_lp_gap, paired_delta, summary, tag_by_grid
-from bakeoff.config import config_hash, load_config, recipe
-from bakeoff.results import log_row, read_results
+from eo_edge_zoo.analysis import ft_lp_gap, paired_delta, summary, tag_by_grid
+from eo_edge_zoo.config import config_hash, load_config, recipe
+from eo_edge_zoo.results import log_row, read_results
+from eo_edge_zoo.tasks import get_task
 
 
 def row(top1, **overrides):
     """Results row as train.run writes it (config JSON + hash)."""
     cfg = load_config(None, [f"{key}={value}" for key, value in overrides.items()])
     return dict(backbone=cfg.backbone, init=cfg.init, mode=cfg.mode, frac=cfg.frac, seed=cfg.seed,
-                in_chans=cfg.init.in_chans, top1_test=top1,
+                in_chans=get_task(cfg.task).in_chans(cfg.init), top1_test=top1,
                 config_hash=config_hash(cfg), config=json.dumps(recipe(cfg), sort_keys=True))
 
 

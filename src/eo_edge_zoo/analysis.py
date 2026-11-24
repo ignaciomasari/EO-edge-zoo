@@ -123,30 +123,30 @@ def variants(agg: pd.DataFrame, split_by: list[str]) -> list[tuple[str, pd.DataF
     out = []
     for combo in ft_rows[split_by].drop_duplicates().itertuples(index=False):
         mask = pd.Series(True, index=agg.index)
-        for k, v in zip(split_by, combo):
+        for k, v in zip(split_by, combo, strict=True):
             if pd.notna(v):
                 mask &= agg[k].isna() | (agg[k] == v)
-        title = ", ".join(f"{k}={v}" for k, v in zip(split_by, combo) if pd.notna(v))
+        title = ", ".join(f"{k}={v}" for k, v in zip(split_by, combo, strict=True) if pd.notna(v))
         out.append((title, agg[mask]))
     return out
 
 
 def plot_pareto(agg: pd.DataFrame, split_by: Sequence[str] = (), x: str = "infer_ips",
-                xlabel: str = "inference img/s"):
+                xlabel: str = "inference img/s", ylabel: str = "test top-1 (%)"):
     """Rows = split_by combos, cols = label fraction; legend/encoding in notebook md."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
-    colour_of = dict(zip(sorted(agg.backbone.unique()), plt.cm.tab10.colors))
-    marker_of = dict(zip(sorted(agg.init.unique()), "os^DvP"))
+    colour_of = dict(zip(sorted(agg.backbone.unique()), plt.cm.tab10.colors, strict=False))  # palette longer
+    marker_of = dict(zip(sorted(agg.init.unique()), "os^DvP", strict=False))
     fracs, groups = sorted(agg.frac.unique()), variants(agg, list(split_by))
     fig, axs = plt.subplots(len(groups), len(fracs), figsize=(5.5 * len(fracs), 4.5 * len(groups)),
                             sharex=True, squeeze=False)
     if agg[x].isna().any():
         log.warning("no bench row (skipped): %s",
                     agg.loc[agg[x].isna(), ["backbone", "in_chans"]].drop_duplicates().values.tolist())
-    for ax_row, (title, rows) in zip(axs, groups):
-        for ax, frac in zip(ax_row, fracs):
+    for ax_row, (title, rows) in zip(axs, groups, strict=True):
+        for ax, frac in zip(ax_row, fracs, strict=True):
             points = rows[(rows.frac == frac) & rows[x].notna()]
             for _, point in points.iterrows():
                 colour = colour_of[point.backbone]
@@ -160,7 +160,7 @@ def plot_pareto(agg: pd.DataFrame, split_by: Sequence[str] = (), x: str = "infer
             ax.grid(alpha=0.3)
             ax.set_xlabel(xlabel)
             ax.set_title(f"{100 * frac:g}% labels" + (f" | {title}" if title else ""))
-        ax_row[0].set_ylabel("EuroSAT test top-1 (%)")
+        ax_row[0].set_ylabel(ylabel)
     handles = [Line2D([], [], color=colour, marker="o", ls="", label=backbone) for backbone, colour in colour_of.items()] + \
         [Line2D([], [], color="gray", marker=marker, ls="", label=init) for init, marker in marker_of.items()] + \
         [Line2D([], [], color="gray", marker="o", ls="", label="FT"),

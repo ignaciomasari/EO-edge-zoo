@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from .config import RunConfig, config_hash, recipe
+from .tasks import get_task
 
 NAN = math.nan
 log = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ class ResultRow:
     @classmethod
     def from_run(cls, cfg: RunConfig, metrics: Metrics) -> "ResultRow":
         return cls(backbone=cfg.backbone, init=str(cfg.init), mode=str(cfg.mode), frac=cfg.frac, seed=cfg.seed,
-                   in_chans=cfg.init.in_chans, **dataclasses.asdict(metrics),
+                   in_chans=get_task(cfg.task).in_chans(cfg.init), **dataclasses.asdict(metrics),
                    config_hash=config_hash(cfg), config=json.dumps(recipe(cfg), sort_keys=True))
 
 

@@ -1,4 +1,4 @@
-"""One run (FT via Lightning | LP) -> results row: `python -m bakeoff.train --set mode=lp backbone=vit_s16 seed=1`."""
+"""One run (FT via Lightning | LP) -> results row: `python -m eo_edge_zoo.train --set mode=lp backbone=vit_s16 seed=1`."""
 import argparse
 import dataclasses
 import math
@@ -14,12 +14,13 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from . import data as bd
-from . import setup_logging
 from . import models as bm
+from . import setup_logging
 from .config import Aug, Mode, RunConfig, config_hash, load_config
 from .data import Data
 from .lp import run_lp
 from .results import FTMetrics, Metrics, ResultRow, log_row
+from .tasks import Task, get_task
 
 # data = in-RAM int16 tensors, prep on GPU -> workers not needed
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
@@ -42,11 +43,11 @@ def param_groups(model: nn.Module, wd: float) -> list[dict[str, Any]]:
 
 
 class FTModule(L.LightningModule):
-    """Full FT; prep + D4 aug on GPU after batch transfer."""
+    """Full FT; prep + D4 aug on GPU after batch transfer; eval metrics from task."""
 
-    def __init__(self, model: nn.Module, spec: bm.InputSpec, cfg: RunConfig, total_steps: int):
+    def __init__(self, model: nn.Module, spec: bm.InputSpec, cfg: RunConfig, total_steps: int, task: Task):
         super().__init__()
-        self.model, self.spec, self.cfg, self.total_steps = model, spec, cfg, total_steps
+        self.model, self.spec, self.cfg, self.total_steps, self.task = model, spec, cfg, total_steps, task
         self.criterion = nn.CrossEntropyLoss(label_smoothing=cfg.label_smooth)
         self.last_loss, self.train_time_s = float("nan"), float("nan")
 
@@ -79,15 +80,18 @@ class FTModule(L.LightningModule):
         return loss
 
     def _eval_start(self):
-        self.correct, self.count = 0, 0
+        self.preds, self.targets = [], []
 
     def _eval_step(self, batch):
         x, y = batch
-        self.correct += (self(x).argmax(1) == y).sum().item()
-        self.count += len(y)
+        self.preds.append(self(x).argmax(1))
+        self.targets.append(y)
 
     def _eval_end(self, split):
-        self.log(f"{split}_acc", self.correct / max(1, self.count))
+        empty = torch.empty(0, dtype=torch.long, device=self.device)
+        metrics = self.task.metrics(torch.cat(self.preds or [empty]), torch.cat(self.targets or [empty]))
+        for name, value in metrics.items():
+            self.log(f"{split}_{name}", value)
 
     on_validation_epoch_start = on_test_epoch_start = _eval_start
     on_validation_epoch_end = partialmethod(_eval_end, "val")
@@ -133,7 +137,7 @@ def run_ft(cfg: RunConfig, data: Data) -> FTMetrics:
     model, spec = bm.build_from(cfg, data["train"][0])
     _, x, y = bd.train_subset(data, cfg)
     steps_per_epoch = max(1, len(y) // cfg.bs)
-    module = FTModule(model, spec, cfg, steps_per_epoch * cfg.max_epochs)
+    module = FTModule(model, spec, cfg, steps_per_epoch * cfg.max_epochs, get_task(cfg.task))
     loggers = _loggers(cfg)
     trainer = L.Trainer(accelerator=cfg.accelerator, devices=1, precision=cfg.precision, max_epochs=cfg.max_epochs,
                         gradient_clip_val=cfg.clip, logger=loggers, enable_checkpointing=False,
@@ -147,10 +151,10 @@ def run_ft(cfg: RunConfig, data: Data) -> FTMetrics:
     trainer.fit(module, _loader(x, y, cfg.bs, True, cfg.num_workers), val_loader)
     peak_mem_mb = torch.cuda.max_memory_allocated() / 2**20 if on_cuda else float("nan")
 
-    def top1(split: str, evaluate: Callable) -> float:  # evaluate: trainer.validate | trainer.test
+    def score(split: str, evaluate: Callable) -> float:  # evaluate: trainer.validate | trainer.test
         loader = _loader(*data[split], bd.EVAL_BS, False, cfg.num_workers)
-        return evaluate(module, loader, verbose=False)[0][f"{split}_acc"]
-    return FTMetrics(n_train=len(y), top1_val=top1("val", trainer.validate), top1_test=top1("test", trainer.test),
+        return evaluate(module, loader, verbose=False)[0][f"{split}_{module.task.primary_metric}"]
+    return FTMetrics(n_train=len(y), top1_val=score("val", trainer.validate), top1_test=score("test", trainer.test),
                      steps=trainer.global_step, final_loss=float(module.last_loss),
                      train_time_s=module.train_time_s, train_peak_mem_MB=peak_mem_mb)
 
@@ -159,9 +163,9 @@ RUNNERS: dict[Mode, Callable[[RunConfig, Data], Metrics]] = {Mode.FT: run_ft, Mo
 
 
 def run(cfg: RunConfig, data: Data | None = None) -> ResultRow:
-    """One run -> results row, appended to cfg.results_csv. data: {split: (x int16, y)} or load cache."""
+    """One run -> results row, appended to cfg.results_csv. data: {split: (x int16, y)} or task.load()."""
     L.seed_everything(cfg.seed, workers=True, verbose=False)
-    data = data or bd.load_eurosat(cfg.data_root)
+    data = data or get_task(cfg.task).load(cfg.data_root)
     row = ResultRow.from_run(cfg, RUNNERS[cfg.mode](cfg, data))
     log_row(cfg.results_csv, row)
     return row

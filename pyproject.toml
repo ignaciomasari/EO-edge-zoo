@@ -1,22 +1,32 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["bakeoff"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [project]
-name = "bakeoff"
-version = "0.1.0"
+name = "eo-edge-zoo"
+version = "0.0.1"
+description = "Small Earth-observation models with one eval protocol and comparable accuracy + edge metrics"
+readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = ["torch", "timm", "numpy", "pandas", "lightning>=2.4", "pyyaml"]
 
 [project.optional-dependencies]
-geo = ["torchgeo"]
+geo = ["torchgeo"]               # dataset download + S2 SSL weights
 test = ["pytest"]
 tb = ["tensorboard"]
-nb = ["matplotlib", "tabulate"]  # analysis cells
+nb = ["matplotlib", "tabulate"]  # analysis notebook
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W", "I", "UP", "B"]  # explicit: defaults vary by ruff version
+ignore = ["E731"]  # small local lambdas are deliberate

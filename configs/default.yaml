@@ -1,13 +1,14 @@
-# Notebook recipe. One run per call: python -m bakeoff.train --set mode=lp backbone=vit_s16 init=s2_ssl frac=0.01 seed=1
+# Default recipe. One run per call: python -m eo_edge_zoo.train --set mode=lp backbone=vit_s16 init=s2_ssl frac=0.01 seed=1
+task: eurosat           # see eo_edge_zoo/tasks (dataset, bands, splits, head size, metrics)
 mode: ft                # ft (Lightning) | lp (frozen features + linear head)
 backbone: resnet50      # resnet50 | vit_s16 | convnext_t
-init: imagenet_rgb      # imagenet_rgb | s2_ssl | imagenet_13ch (see bakeoff/models.py BACKBONES)
+init: imagenet_rgb      # imagenet_rgb | s2_ssl | imagenet_13ch (see eo_edge_zoo/models.py BACKBONES)
 frac: 0.1
 seed: 0
 
 # shared
 img_size: 224
-num_classes: 10
+num_classes: null       # null -> task's
 pretrained: true
 precision: bf16-mixed
 
@@ -32,9 +33,9 @@ lp_bs: 256
 lp_wd_grid: [0.0, 1.0e-4, 1.0e-3, 1.0e-2]   # best on val
 
 # system (not part of config_hash); paths may use {WORK_DIR}
-out_dir: null           # null -> WORK_DIR/saved_models/backbone_bakeoff (WORK_DIR = /home/jovyan/work on pod, else ..)
-data_root: null         # null -> WORK_DIR/data/eurosat
-results_csv: null       # null -> out_dir/results.csv (same file as notebook)
+out_dir: null           # null -> WORK_DIR/saved_models/eo_edge_zoo/<task> (WORK_DIR = /home/jovyan/work on pod, else ..)
+data_root: null         # null -> WORK_DIR/data/<task>
+results_csv: null       # null -> out_dir/results.csv 
 accelerator: auto
 num_workers: 0          # data in RAM, prep on GPU
 progress: true

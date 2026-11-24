@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from bakeoff.config import config_hash, load_config
+from eo_edge_zoo.config import config_hash, load_config
 
 
 def write(tmp_path, text):
@@ -85,15 +85,15 @@ def test_hash_uses_resolved_epochs():
 
 
 def test_work_dir_placeholder_in_paths():
-    from bakeoff.config import work_dir
+    from eo_edge_zoo.config import work_dir
     cfg = load_config(None, ["out_dir={WORK_DIR}/x"])
     assert cfg.out_dir == f"{work_dir()}/x" and cfg.results_csv == f"{work_dir()}/x/results.csv"
 
 
 def test_work_dir_env_overrides_default(monkeypatch, tmp_path):
-    monkeypatch.setenv("BAKEOFF_WORK_DIR", str(tmp_path))
+    monkeypatch.setenv("EO_EDGE_ZOO_WORK_DIR", str(tmp_path))
     cfg = load_config(None, ["data_root={WORK_DIR}/d"])
-    assert cfg.data_root == f"{tmp_path}/d" and cfg.out_dir == f"{tmp_path}/saved_models/backbone_bakeoff"
+    assert cfg.data_root == f"{tmp_path}/d" and cfg.out_dir == f"{tmp_path}/saved_models/eo_edge_zoo/eurosat"
 
 
 def test_text_overrides_tolerate_quotes_and_spaces():
@@ -115,9 +115,33 @@ def test_invalid_init_raises():
 
 
 def test_direct_construction_validated_and_coerced():
-    from bakeoff.config import Init, Mode, RunConfig
+    from eo_edge_zoo.config import Init, Mode, RunConfig
     cfg = RunConfig(mode="lp", init="s2_ssl", lr="1e-3", out_dir="{WORK_DIR}/x")
     assert cfg.mode is Mode.LP and cfg.init is Init.S2_SSL and cfg.lr == 1e-3 and "{" not in cfg.results_csv
-    assert cfg.init.in_chans == 13 and Init.IMAGENET_RGB.in_chans == 3
     with pytest.raises(ValueError, match="kd"):
         RunConfig(mode="kd")
+
+
+# --- task
+def test_task_defaults_to_eurosat_and_sets_head_size():
+    cfg = load_config()
+    assert cfg.task == "eurosat" and cfg.num_classes == 10
+    assert load_config(None, ["num_classes=7"]).num_classes == 7  # explicit override kept
+
+
+def test_unknown_task_raises():
+    with pytest.raises(ValueError, match="eurosa"):
+        load_config(None, ["task=eurosa"])
+
+
+def test_eurosat_hash_omits_task_other_tasks_include_it(monkeypatch):
+    # eurosat: hash identical to pre-task bake-off runs (see test_hash_pinned_to_existing_results)
+    from test_tasks import other_order_task
+
+    from eo_edge_zoo.config import recipe
+    from eo_edge_zoo.tasks import TASKS
+    assert "task" not in recipe(load_config())
+    monkeypatch.setitem(TASKS, "file_order", other_order_task())
+    other = load_config(None, ["task=file_order"])
+    assert recipe(other)["task"] == "file_order" and other.num_classes == 3
+    assert config_hash(other) != config_hash(load_config())

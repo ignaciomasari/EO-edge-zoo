@@ -5,9 +5,9 @@ import pytest
 import timm
 import torch
 
-import bakeoff.models as bm
-from bakeoff.results import RESULT_COLS, read_results
-from bakeoff.train import lr_lambda, main, param_groups
+import eo_edge_zoo.models as bm
+from eo_edge_zoo.results import RESULT_COLS, read_results
+from eo_edge_zoo.train import lr_lambda, main, param_groups
 
 
 # --- warmup -> cosine (values from notebook formula, worked by hand)
@@ -84,3 +84,36 @@ def test_lp_cli_writes_lp_row_and_caches_features(tmp_path, monkeypatch):
     monkeypatch.setattr(bm, "build", no_build)
     main(lp_argv(tmp_path) + ["seed=1"], data=fake_eurosat())
     assert len(read_results(str(tmp_path / "results.csv"))) == 2
+
+
+# --- task routing: data, input bands, head size, metrics all come from the task
+def four_band_task():
+    from dataclasses import dataclass
+
+    from eo_edge_zoo.tasks import ClassificationTask
+
+    @dataclass(frozen=True)
+    class FourBand(ClassificationTask):
+        primary_metric = "acc"  # not top1 -> proves results use task's primary metric
+
+        def load(self, root, num_workers=4):
+            generator = torch.Generator().manual_seed(0)
+            make_split = lambda: (torch.randint(0, 4000, (12, 4, 16, 16), generator=generator, dtype=torch.int16),
+                                  torch.arange(12) % 3)
+            return {split: make_split() for split in self.splits}
+
+        def metrics(self, preds, targets):
+            assert preds.max() < 3  # head has task's 3 classes
+            return {"acc": 0.123, "top1": 0.9}
+    return FourBand(name="four_band", num_classes=3, bands=("B02", "B03", "B04", "B08"))
+
+
+@pytest.mark.parametrize("mode,init,chans", [("ft", "imagenet_13ch", 4), ("lp", "imagenet_rgb", 3)])
+def test_custom_task_drives_data_bands_head_and_metrics(tmp_path, monkeypatch, mode, init, chans):
+    from eo_edge_zoo.tasks import TASKS
+    monkeypatch.setitem(TASKS, "four_band", four_band_task())
+    row = main(["--set", "task=four_band", f"mode={mode}", "backbone=convnext_t", f"init={init}", "frac=1.0",
+                "epochs=1", "bs=4", "lp_epochs=2", "img_size=32", "pretrained=false", "accelerator=cpu",
+                "precision=32-true", "progress=false", f"out_dir={tmp_path}"])  # no data= -> task.load()
+    assert (row["in_chans"], row["n_train"]) == (chans, 12)
+    assert (row["top1_val"], row["top1_test"]) == pytest.approx((0.123, 0.123))  # Lightning logs float32
