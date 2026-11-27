@@ -54,6 +54,26 @@ python -m eo_edge_zoo.grid my_grid.yaml --set epochs=2      # override for every
 
 Combinations a backbone doesn't support (e.g. ConvNeXt + S2 SSL) are dropped. Each run logs to `out_dir/logs/<hash>.log`, and failures go to `failures.csv`. From Python: `GridSpec.load(path).expand()` returns the `Run`s, and `launch(path)` runs them.
 
+## Saving fine-tuned weights
+
+Fine-tune runs keep no weights by default. With `save_ckpt=true`, a run saves its final weights, recipe, input normalisation and metrics to `out_dir/ckpt/<config_hash>.pt`. A ResNet-50 checkpoint is about 100 MB, so turn it on for the runs you want to export, not for sweeps. Linear-probe runs never save weights.
+
+```bash
+python -m eo_edge_zoo.train --set backbone=resnet50 init=s2_ssl frac=1.0 save_ckpt=true
+python -m eo_edge_zoo.grid my_export_grid.yaml --set save_ckpt=true   # reruns finished FT runs that lack weights
+```
+
+`save_ckpt` is not part of the config hash. With it on, the grid launcher also reruns finished fine-tune runs whose checkpoint file is missing. The rerun appends a new results row, and `read_results` keeps only the last row per config hash, so seed counts stay correct.
+
+```python
+from eo_edge_zoo.checkpoint import load_checkpoint
+from eo_edge_zoo.models import prep
+
+ckpt = load_checkpoint(path)                                      # rebuilds the arch (no download), loads weights
+logits = ckpt.model(prep(x_int16, ckpt.spec, False, ckpt.recipe["img_size"]))
+ckpt.metrics["top1_test"]                                         # accuracy as logged
+```
+
 ## Tuning recipes on validation data
 
 ```bash

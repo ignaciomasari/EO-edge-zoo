@@ -41,3 +41,4 @@ num_workers: 0          # data in RAM, prep on GPU
 progress: true
 curves: true            # FT: out_dir/runs/<hash>/metrics.csv
 tensorboard: false      # FT: + out_dir/tb/<hash> (needs tensorboard)
+save_ckpt: false        # FT: weights -> out_dir/ckpt/<hash>.pt (needed for ONNX / INT8 export; ~100 MB for RN50)

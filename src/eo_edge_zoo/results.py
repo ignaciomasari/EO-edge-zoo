@@ -83,8 +83,13 @@ def _ensure_schema(path: str) -> bool:
 
 
 def read_results(path: str) -> pd.DataFrame | None:
-    """DataFrame or None (missing / moved to .bak)."""
-    return pd.read_csv(path) if _ensure_schema(path) else None
+    """DataFrame or None (missing / moved to .bak). Re-runs (same config_hash, e.g. for a checkpoint) -> last row
+    kept; rows w/o hash (notebook) all kept."""
+    if not _ensure_schema(path):
+        return None
+    df = pd.read_csv(path)
+    rerun = df.config_hash.notna() & df.config_hash.duplicated(keep="last")
+    return df[~rerun].reset_index(drop=True)
 
 
 def log_row(path: str, row: ResultRow | Mapping[str, Any]) -> None:

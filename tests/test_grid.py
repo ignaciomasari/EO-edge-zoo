@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -46,6 +47,20 @@ def test_runs_with_hash_in_results_are_skipped(tmp_path):
     assert [run.cfg.seed for run in pending(runs)] == [0, 2]
     changed = expand(grid_file(tmp_path, {"seed": [0, 1, 2]}, {"lr": 1e-3}))
     assert len(pending(changed)) == 3  # recipe changed -> new hashes
+
+
+def test_done_run_reruns_only_if_checkpoint_wanted_and_missing(tmp_path):
+    from eo_edge_zoo.checkpoint import ckpt_path
+
+    runs = expand(grid_file(tmp_path, {"seed": [0, 1]}, {"save_ckpt": True}))
+    for run in runs:
+        log_row(run.cfg.results_csv, dict(backbone="resnet50", seed=run.cfg.seed, config_hash=run.run_id))
+    path = ckpt_path(runs[0].cfg)
+    os.makedirs(os.path.dirname(path))
+    open(path, "w").close()
+    assert [run.cfg.seed for run in pending(runs)] == [1]                   # done, no ckpt -> rerun
+    assert pending(expand(grid_file(tmp_path, {"seed": [0, 1]}))) == []    # save_ckpt off -> done = done
+    assert runs[0].run_id == expand(grid_file(tmp_path, {"seed": [0]}))[0].run_id  # save_ckpt not in hash
 
 
 def test_warns_when_only_pre_rename_results_exist(tmp_path, caplog):

@@ -41,6 +41,7 @@ Then use `backbone=effnet_b0` in a config or grid; the benchmark and edge metric
 | `bands.py`, `data.py` | Sentinel-2 band order; stratified label subsets (same subset for every model at a given fraction and seed), batching |
 | `models.py` | `Backbone` registry, `build()` per init and task, GPU preprocessing + D4 augmentation |
 | `train.py`, `lp.py` | one fine-tune (Lightning) or linear-probe run → `ResultRow` |
+| `checkpoint.py` | save fine-tuned weights + recipe + input spec (`save_ckpt=true`); `load_checkpoint` rebuilds the tested model |
 | `results.py` | `ResultRow` / `FTMetrics` / `LPMetrics`; append-only results CSV |
 | `grid.py`, `tune.py` | `GridSpec`, `Rule`, `launch`; val-based recipe selection |
 | `analysis.py`, `bench.py` | tables, paired deltas, Pareto plots; throughput / memory benchmark |

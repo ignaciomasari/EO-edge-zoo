@@ -21,6 +21,7 @@ import pandas as pd
 import yaml
 
 from . import setup_logging
+from .checkpoint import ckpt_path
 from .config import RunConfig, config_hash, load_config
 from .models import available
 from .results import KEY, append_csv, done_hashes
@@ -140,7 +141,8 @@ def pending(runs: Sequence[Run]) -> list[Run]:
                 log.warning("no %s but found %s: move %s -> %s to resume", run.cfg.results_csv, old,
                             os.path.dirname(old), os.path.dirname(run.cfg.results_csv))
             done[run.cfg.results_csv] = done_hashes(run.cfg.results_csv)
-    return [run for run in runs if run.run_id not in done[run.cfg.results_csv]]
+    missing_ckpt = lambda run: run.cfg.save_ckpt and run.cfg.mode == "ft" and not os.path.isfile(ckpt_path(run.cfg))
+    return [run for run in runs if run.run_id not in done[run.cfg.results_csv] or missing_ckpt(run)]
 
 
 def _last_line(log_path: str) -> str:

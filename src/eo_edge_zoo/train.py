@@ -1,6 +1,7 @@
 """One run (FT via Lightning | LP) -> results row: `python -m eo_edge_zoo.train --set mode=lp backbone=vit_s16 seed=1`."""
 import argparse
 import dataclasses
+import logging
 import math
 import time
 import warnings
@@ -16,12 +17,14 @@ from torch.utils.data import DataLoader, TensorDataset
 from . import data as bd
 from . import models as bm
 from . import setup_logging
+from .checkpoint import save_checkpoint
 from .config import Aug, Mode, RunConfig, config_hash, load_config
 from .data import Data
 from .lp import run_lp
 from .results import FTMetrics, Metrics, ResultRow, log_row
 from .tasks import Task, get_task
 
+log = logging.getLogger("eo_edge_zoo.train")  # not __name__: "__main__" under `python -m`
 # data = in-RAM int16 tensors, prep on GPU -> workers not needed
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -154,9 +157,12 @@ def run_ft(cfg: RunConfig, data: Data) -> FTMetrics:
     def score(split: str, evaluate: Callable) -> float:  # evaluate: trainer.validate | trainer.test
         loader = _loader(*data[split], bd.EVAL_BS, False, cfg.num_workers)
         return evaluate(module, loader, verbose=False)[0][f"{split}_{module.task.primary_metric}"]
-    return FTMetrics(n_train=len(y), top1_val=score("val", trainer.validate), top1_test=score("test", trainer.test),
-                     steps=trainer.global_step, final_loss=float(module.last_loss),
-                     train_time_s=module.train_time_s, train_peak_mem_MB=peak_mem_mb)
+    metrics = FTMetrics(n_train=len(y), top1_val=score("val", trainer.validate), top1_test=score("test", trainer.test),
+                        steps=trainer.global_step, final_loss=float(module.last_loss),
+                        train_time_s=module.train_time_s, train_peak_mem_MB=peak_mem_mb)
+    if cfg.save_ckpt:
+        log.info("checkpoint -> %s", save_checkpoint(cfg, module.model, module.spec, metrics))
+    return metrics
 
 
 RUNNERS: dict[Mode, Callable[[RunConfig, Data], Metrics]] = {Mode.FT: run_ft, Mode.LP: run_lp}
@@ -165,6 +171,8 @@ RUNNERS: dict[Mode, Callable[[RunConfig, Data], Metrics]] = {Mode.FT: run_ft, Mo
 def run(cfg: RunConfig, data: Data | None = None) -> ResultRow:
     """One run -> results row, appended to cfg.results_csv. data: {split: (x int16, y)} or task.load()."""
     L.seed_everything(cfg.seed, workers=True, verbose=False)
+    if cfg.save_ckpt and cfg.mode is Mode.LP:
+        log.warning("save_ckpt ignored for LP (no fine-tuned weights)")
     data = data or get_task(cfg.task).load(cfg.data_root)
     row = ResultRow.from_run(cfg, RUNNERS[cfg.mode](cfg, data))
     log_row(cfg.results_csv, row)

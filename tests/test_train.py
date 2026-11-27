@@ -117,3 +117,27 @@ def test_custom_task_drives_data_bands_head_and_metrics(tmp_path, monkeypatch, m
                 "precision=32-true", "progress=false", f"out_dir={tmp_path}"])  # no data= -> task.load()
     assert (row["in_chans"], row["n_train"]) == (chans, 12)
     assert (row["top1_val"], row["top1_test"]) == pytest.approx((0.123, 0.123))  # Lightning logs float32
+
+
+# --- checkpoint: saved weights rebuild the exact tested model
+@pytest.mark.parametrize("backbone,init", [("resnet50", "s2_ssl"), ("convnext_t", "imagenet_13ch")])
+def test_checkpoint_reproduces_logged_test_accuracy(tmp_path, backbone, init):
+    from eo_edge_zoo.checkpoint import load_checkpoint
+
+    data = fake_eurosat()
+    row = main(["--set", f"backbone={backbone}", f"init={init}", "frac=1.0", "epochs=1", "bs=8", "img_size=32",
+                "pretrained=false", "accelerator=cpu", "precision=32-true", "progress=false", "save_ckpt=true",
+                f"out_dir={tmp_path}"], data=data)
+    ckpt = load_checkpoint(str(tmp_path / "ckpt" / f"{row['config_hash']}.pt"))
+    assert ckpt.config_hash == row["config_hash"] and ckpt.recipe["backbone"] == backbone
+    assert ckpt.metrics["top1_test"] == row["top1_test"]
+    x_test, y_test = data["test"]
+    with torch.no_grad():
+        preds = ckpt.model(bm.prep(x_test, ckpt.spec, False, ckpt.recipe["img_size"])).argmax(1)
+    assert (preds == y_test).float().mean().item() == pytest.approx(row["top1_test"])
+
+
+def test_no_checkpoint_by_default(tmp_path):
+    main(["--set", "frac=1.0", "epochs=1", "bs=8", "img_size=32", "pretrained=false", "accelerator=cpu",
+          "precision=32-true", "progress=false", f"out_dir={tmp_path}"], data=fake_eurosat())
+    assert not (tmp_path / "ckpt").exists()

@@ -48,3 +48,11 @@ def test_result_row_from_run_round_trips(tmp_path):
     saved = read_results(cfg.results_csv).iloc[0]
     assert (saved.init, saved["mode"], saved.in_chans, saved.lp_wd) == ("s2_ssl", "lp", 13, 1e-3)
     assert pd.isna(saved.steps)
+
+
+def test_rerun_keeps_last_row_per_hash_and_all_hashless_rows(tmp_path):
+    results_csv = str(tmp_path / "r.csv")
+    for top1, run_hash in [(0.90, "a"), (0.80, "b"), (0.91, "a"), (0.5, None), (0.6, None)]:
+        log_row(results_csv, dict(backbone="resnet50", top1_test=top1, config_hash=run_hash))
+    df = read_results(results_csv)
+    assert df.top1_test.tolist() == [0.80, 0.91, 0.5, 0.6]

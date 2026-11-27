@@ -86,6 +86,7 @@ class RunConfig:
     progress: bool = True
     curves: bool = True             # FT: out_dir/runs/<hash>/metrics.csv
     tensorboard: bool = False       # FT: + TB events (needs tensorboard)
+    save_ckpt: bool = False         # FT: weights -> out_dir/ckpt/<hash>.pt (~100 MB for RN50)
 
     def __post_init__(self):
         """Coerce types (YAML "1e-3" is str), validate choices, resolve paths. Idempotent."""
@@ -127,7 +128,8 @@ def base_type(annotation: Any) -> Any:
 
 
 SHARED_KEYS = {"task", "mode", "backbone", "init", "frac", "seed", "img_size", "num_classes", "pretrained", "precision"}
-SYSTEM_KEYS = {"out_dir", "data_root", "results_csv", "accelerator", "num_workers", "progress", "curves", "tensorboard"}
+SYSTEM_KEYS = {"out_dir", "data_root", "results_csv", "accelerator", "num_workers", "progress", "curves", "tensorboard",
+               "save_ckpt"}
 FT_KEYS = {"epochs", "epochs_by_frac", "lr", "wd", "warmup_frac", "label_smooth", "clip", "bs",
            "drop_rate", "drop_path_rate", "aug", "val_every"}
 LP_KEYS = {"lp_epochs", "lp_lr", "lp_bs", "lp_wd_grid"}
